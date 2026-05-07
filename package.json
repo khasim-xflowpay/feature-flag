@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@aws-sdk/client-appconfig": "^3.1044.0",
     "@aws-sdk/client-appconfigdata": "^3.1044.0",
     "next": "16.2.5",
     "react": "19.2.4",

@@ -3,6 +3,7 @@ import {
 	GetLatestConfigurationCommand,
 	StartConfigurationSessionCommand,
 } from "@aws-sdk/client-appconfigdata";
+import { normalizeFeatureFlagsConfig } from "@/lib/featureFlagConfig";
 import type {
 	FeatureFlagDefinition,
 	FeatureFlagsConfig,
@@ -40,16 +41,34 @@ function isFeatureFlagAttributes(
 		return false;
 	}
 	const o = value as Record<string, unknown>;
-	const listKeys = [
-		"allowedAccounts",
-		"accountTypes",
-		"countries",
-		"blackListedAccounts",
-	] as const;
-	for (const key of listKeys) {
-		if (key in o && o[key] !== undefined && !isStringArray(o[key])) {
-			return false;
-		}
+	return Object.values(o).every(
+		(v) => v === undefined || isStringArray(v),
+	);
+}
+
+function isFeatureFlagMetaData(
+	value: unknown,
+): value is NonNullable<FeatureFlagDefinition["meta_data"]> {
+	if (value === undefined) {
+		return true;
+	}
+	if (typeof value !== "object" || value === null) {
+		return false;
+	}
+	const o = value as Record<string, unknown>;
+	if (
+		"version" in o &&
+		o.version !== undefined &&
+		typeof o.version !== "string"
+	) {
+		return false;
+	}
+	if (
+		"description" in o &&
+		o.description !== undefined &&
+		typeof o.description !== "string"
+	) {
+		return false;
 	}
 	return true;
 }
@@ -62,18 +81,23 @@ function isFeatureFlagDefinition(value: unknown): value is FeatureFlagDefinition
 	if (typeof o.enabled !== "boolean") {
 		return false;
 	}
-	if ("metaData" in o && o.metaData !== undefined) {
-		if (typeof o.metaData !== "object" || o.metaData === null) {
+	const tsKeys = ["created_at", "updated_at", "valid_until"] as const;
+	for (const key of tsKeys) {
+		if (key in o && o[key] !== undefined && typeof o[key] !== "number") {
 			return false;
 		}
-		const meta = o.metaData as Record<string, unknown>;
-		if (
-			"description" in meta &&
-			meta.description !== undefined &&
-			typeof meta.description !== "string"
-		) {
-			return false;
-		}
+	}
+	if (
+		"environment" in o &&
+		o.environment !== undefined &&
+		typeof o.environment !== "string"
+	) {
+		return false;
+	}
+	const meta =
+		o.meta_data ?? ("metaData" in o ? o.metaData : undefined);
+	if (!isFeatureFlagMetaData(meta)) {
+		return false;
 	}
 	if ("attributes" in o && !isFeatureFlagAttributes(o.attributes)) {
 		return false;
@@ -95,7 +119,8 @@ export function assertFeatureFlagsConfig(value: unknown): FeatureFlagsConfig {
 			throw new Error(`Invalid feature flag definition for "${name}"`);
 		}
 	}
-	return value as FeatureFlagsConfig;
+	const parsed = value as FeatureFlagsConfig;
+	return normalizeFeatureFlagsConfig(parsed);
 }
 
 function decodeConfiguration(bytes: Uint8Array): FeatureFlagsConfig {
@@ -153,8 +178,9 @@ export async function pullFeatureFlagsConfig(
 		throw new Error("GetLatestConfiguration did not return NextPollConfigurationToken");
 	}
 
+	// AWS may return `null` (not only `undefined`) when there is no new body yet.
 	const raw = latest.Configuration;
-	if (raw !== undefined && raw.byteLength > 0) {
+	if (raw != null && raw.byteLength > 0) {
 		return { nextPollToken, config: decodeConfiguration(raw) };
 	}
 

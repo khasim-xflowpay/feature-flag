@@ -86,3 +86,11 @@ export async function getFeatureFlagsConfig(): Promise<FeatureFlagsConfig> {
 
 	return state.inflight;
 }
+
+/** Call after publishing a new hosted version so the next read does not use a stale cache. */
+export function invalidateFeatureFlagsCache(): void {
+	state.nextPollToken = undefined;
+	state.lastConfig = undefined;
+	state.lastFetchedAt = 0;
+	state.inflight = undefined;
+}
