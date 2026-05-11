@@ -1,4 +1,3 @@
-import { getAppConfigDataClient } from "@/appconfig/client";
 import { fetchAppConfigJson } from "@/appconfig/fetchConfig";
 import { publishHostedConfigurationJson } from "@/appconfig/deployHostedConfig";
 import { NextRequest, NextResponse } from "next/server";
@@ -15,10 +14,16 @@ function isAuthorized(request: NextRequest): boolean {
 	return header === secret;
 }
 
-export async function GET() {
+function readEntityId(request: NextRequest): string | undefined {
+	const id =
+		request.headers.get("entity-id") ??
+		request.headers.get("x-entity-id");
+	return id === null || id === "" ? undefined : id;
+}
+
+export async function GET(request: NextRequest) {
 	try {
-		const client = getAppConfigDataClient();
-		const config = await fetchAppConfigJson(client);
+		const config = await fetchAppConfigJson(readEntityId(request));
 		return NextResponse.json(config);
 	} catch (err) {
 		console.error("[appconfig] fetch failed", err);

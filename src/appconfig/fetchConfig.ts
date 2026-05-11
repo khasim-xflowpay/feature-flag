@@ -3,6 +3,7 @@ import {
 	GetLatestConfigurationCommand,
 	StartConfigurationSessionCommand,
 } from "@aws-sdk/client-appconfigdata";
+import { getAppConfigDataClient } from "./client";
 
 export interface AppConfigIdentifiers {
 	applicationId: string;
@@ -20,6 +21,57 @@ function readAppConfigEnv(): AppConfigIdentifiers {
 		);
 	}
 	return { applicationId, environmentId, profileId };
+}
+
+/**
+ * When `APPCONFIG_AGENT_BASE_URL` is set (e.g. `http://127.0.0.1:2772`), config is loaded
+ * through the [AppConfig Agent](https://docs.aws.amazon.com/appconfig/latest/userguide/appconfig-agent-how-to-use.html).
+ * Pass `entityId` so the agent can apply entity-based gradual deployments (same as `Entity-Id` on the agent).
+ *
+ * The AppConfig Data API (`StartConfigurationSession`) does not take an entity id; per-entity rollout is agent-side.
+ */
+function getAgentBaseUrl(): string | undefined {
+	const raw = process.env.APPCONFIG_AGENT_BASE_URL;
+	if (raw === undefined || raw === "") {
+		return undefined;
+	}
+	return raw.replace(/\/$/, "");
+}
+
+async function fetchAppConfigJsonViaAgent(
+	baseUrl: string,
+	entityId: string | undefined,
+): Promise<unknown> {
+	const { applicationId, environmentId, profileId } = readAppConfigEnv();
+	const path = [
+		"applications",
+		encodeURIComponent(applicationId),
+		"environments",
+		encodeURIComponent(environmentId),
+		"configurations",
+		encodeURIComponent(profileId),
+	].join("/");
+	const url = `${baseUrl}/${path}`;
+
+	const headers: HeadersInit = {};
+	if (entityId !== undefined && entityId !== "") {
+		headers["Entity-Id"] = entityId;
+	}
+
+	const res = await fetch(url, { headers, cache: "no-store" });
+	if (!res.ok) {
+		const detail = await res.text().catch(() => "");
+		throw new Error(
+			`AppConfig Agent request failed (${res.status}): ${detail.slice(0, 500)}`,
+		);
+	}
+
+	const text = await res.text();
+	try {
+		return JSON.parse(text) as unknown;
+	} catch {
+		throw new Error("AppConfig Agent response is not valid JSON");
+	}
 }
 
 async function startConfigurationSession(
@@ -42,11 +94,7 @@ async function startConfigurationSession(
 
 const MAX_EMPTY_POLLS = 10;
 
-/**
- * Loads the current hosted configuration from AppConfig and parses it as JSON.
- * Polls with NextPollConfigurationToken when AWS returns an empty body (normal on first call).
- */
-export async function fetchAppConfigJson(
+async function fetchAppConfigJsonViaDataPlane(
 	client: AppConfigDataClient,
 ): Promise<unknown> {
 	const ids = readAppConfigEnv();
@@ -78,4 +126,18 @@ export async function fetchAppConfigJson(
 	}
 
 	throw new Error("AppConfig returned no configuration payload");
+}
+
+/**
+ * Loads hosted configuration as JSON. Uses the AppConfig Agent when `APPCONFIG_AGENT_BASE_URL`
+ * is set (required for entity-based gradual rollout). Otherwise uses the AppConfig Data API.
+ */
+export async function fetchAppConfigJson(
+	entityId?: string,
+): Promise<unknown> {
+	const agentBase = getAgentBaseUrl();
+	if (agentBase) {
+		return fetchAppConfigJsonViaAgent(agentBase, entityId);
+	}
+	return fetchAppConfigJsonViaDataPlane(getAppConfigDataClient());
 }
