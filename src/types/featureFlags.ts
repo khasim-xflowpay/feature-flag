@@ -17,11 +17,9 @@ export interface FeatureFlagDefinition {
 	created_at?: number;
 	updated_at?: number;
 	valid_until?: number;
-	environment?: string;
 	meta_data?: FeatureFlagMetaData;
 	attributes?: FeatureFlagAttributes;
 }
 
-export interface FeatureFlagsConfig {
-	featureFlags: Record<string, FeatureFlagDefinition>;
-}
+/** Root AppConfig JSON: flag key → definition (no wrapper object). */
+export type FeatureFlagsConfig = Record<string, FeatureFlagDefinition>;

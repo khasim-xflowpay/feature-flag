@@ -32,14 +32,28 @@ function readIds(): {
 	};
 }
 
+function readIdsWithOverride(environmentIdOverride?: string): {
+	applicationId: string;
+	environmentId: string;
+	profileId: string;
+	deploymentStrategyId: string;
+} {
+	const ids = readIds();
+	return {
+		...ids,
+		environmentId: environmentIdOverride ?? ids.environmentId,
+	};
+}
+
 /**
  * Uploads a new hosted configuration version and starts a deployment to the environment.
  * IAM needs appconfig:CreateHostedConfigurationVersion and appconfig:StartDeployment.
  */
 export async function publishHostedConfigurationJson(
 	jsonBody: string,
+	options: { environmentId?: string } = {},
 ): Promise<{ versionNumber: number }> {
-	const ids = readIds();
+	const ids = readIdsWithOverride(options.environmentId);
 	const client = getAppConfigControlClient();
 	const content = new TextEncoder().encode(jsonBody);
 

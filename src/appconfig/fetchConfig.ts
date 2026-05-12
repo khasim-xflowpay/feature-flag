@@ -23,6 +23,16 @@ function readAppConfigEnv(): AppConfigIdentifiers {
 	return { applicationId, environmentId, profileId };
 }
 
+function readAppConfigEnvWithOverride(
+	environmentIdOverride?: string,
+): AppConfigIdentifiers {
+	const ids = readAppConfigEnv();
+	return {
+		...ids,
+		environmentId: environmentIdOverride ?? ids.environmentId,
+	};
+}
+
 /**
  * When `APPCONFIG_AGENT_BASE_URL` is set (e.g. `http://127.0.0.1:2772`), config is loaded
  * through the [AppConfig Agent](https://docs.aws.amazon.com/appconfig/latest/userguide/appconfig-agent-how-to-use.html).
@@ -41,8 +51,10 @@ function getAgentBaseUrl(): string | undefined {
 async function fetchAppConfigJsonViaAgent(
 	baseUrl: string,
 	entityId: string | undefined,
+	environmentIdOverride?: string,
 ): Promise<unknown> {
-	const { applicationId, environmentId, profileId } = readAppConfigEnv();
+	const { applicationId, environmentId, profileId } =
+		readAppConfigEnvWithOverride(environmentIdOverride);
 	const path = [
 		"applications",
 		encodeURIComponent(applicationId),
@@ -96,8 +108,9 @@ const MAX_EMPTY_POLLS = 10;
 
 async function fetchAppConfigJsonViaDataPlane(
 	client: AppConfigDataClient,
+	environmentIdOverride?: string,
 ): Promise<unknown> {
-	const ids = readAppConfigEnv();
+	const ids = readAppConfigEnvWithOverride(environmentIdOverride);
 	let token = await startConfigurationSession(client, ids);
 
 	for (let i = 0; i < MAX_EMPTY_POLLS; i++) {
@@ -133,11 +146,18 @@ async function fetchAppConfigJsonViaDataPlane(
  * is set (required for entity-based gradual rollout). Otherwise uses the AppConfig Data API.
  */
 export async function fetchAppConfigJson(
-	entityId?: string,
+	options: { entityId?: string; environmentId?: string } = {},
 ): Promise<unknown> {
 	const agentBase = getAgentBaseUrl();
 	if (agentBase) {
-		return fetchAppConfigJsonViaAgent(agentBase, entityId);
+		return fetchAppConfigJsonViaAgent(
+			agentBase,
+			options.entityId,
+			options.environmentId,
+		);
 	}
-	return fetchAppConfigJsonViaDataPlane(getAppConfigDataClient());
+	return fetchAppConfigJsonViaDataPlane(
+		getAppConfigDataClient(),
+		options.environmentId,
+	);
 }

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import FeatureFlagsAdmin from "./FeatureFlagsAdmin";
 
 export const metadata: Metadata = {
@@ -7,5 +8,9 @@ export const metadata: Metadata = {
 };
 
 export default function AdminFeatureFlagsPage() {
-	return <FeatureFlagsAdmin />;
+	return (
+		<Suspense fallback={null}>
+			<FeatureFlagsAdmin />
+		</Suspense>
+	);
 }

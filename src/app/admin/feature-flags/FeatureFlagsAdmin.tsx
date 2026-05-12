@@ -4,726 +4,778 @@ import type {
 	FeatureFlagDefinition,
 	FeatureFlagsConfig,
 } from "@/types/featureFlags";
-import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "react-toastify";
+import { BulkImportModal } from "./components/BulkImportModal";
+import { ConfirmModal } from "./components/ConfirmModal";
+import { FlagModal } from "./components/FlagModal";
+import { FlagTable } from "./components/FlagTable";
+import { featureFlagsMessages as msg } from "./messages";
+import { FLAG_KEY_RE } from "./utils/flagKey";
+import {
+	DEFAULT_PUBLISH_ENVIRONMENT,
+	getPublishEnvironmentLabel,
+	publishEnvironmentOptions,
+	type PublishEnvironment,
+} from "./publishEnvironments";
+import {
+	buildUpdatedFlag,
+	cloneConfig,
+	configsAreEqual,
+	definitionsEqual,
+} from "./utils/configUtils";
+import { todayUnixSeconds } from "./utils/dateUtils";
 
-function unixSecondsToDatetimeLocal(sec: number | undefined): string {
-	if (sec === undefined || !Number.isFinite(sec)) {
-		return "";
-	}
-	const d = new Date(sec * 1000);
-	const pad = (n: number) => String(n).padStart(2, "0");
-	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-		d.getHours()
-	)}:${pad(d.getMinutes())}`;
-}
+// ─── Types ───────────────────────────────────────────────────────────────────
 
-function datetimeLocalToUnixSeconds(s: string): number | undefined {
-	const t = s.trim();
-	if (t === "") {
-		return undefined;
-	}
-	const ms = new Date(t).getTime();
-	if (!Number.isFinite(ms)) {
-		return undefined;
-	}
-	return Math.floor(ms / 1000);
-}
+type ModalState =
+	| null
+	| { mode: "add"; key: string; def: FeatureFlagDefinition }
+	| { mode: "edit"; key: string; def: FeatureFlagDefinition };
 
-function formatUnixSeconds(sec: number | undefined): string {
-	if (sec === undefined || !Number.isFinite(sec)) {
-		return "—";
-	}
-	return new Date(sec * 1000)
-		.toISOString()
-		.replace("T", " ")
-		.replace(".000Z", " UTC");
-}
+type DirtyAction =
+	| { kind: "reload" }
+	| { kind: "switch-environment"; environment: PublishEnvironment };
 
-function parseOwnerIds(text: string): string[] {
-	return text
-		.split(/[\s,]+/)
-		.map((s) => s.trim())
-		.filter(Boolean);
-}
+type Feedback = { type: "error" | "success"; message: string } | null;
 
-function cloneConfig(c: FeatureFlagsConfig): FeatureFlagsConfig {
-	return JSON.parse(JSON.stringify(c)) as FeatureFlagsConfig;
-}
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-type ModalMode = "closed" | "add" | "edit";
+const EMPTY_CONFIG: FeatureFlagsConfig = {};
 
-type OwnerIdsEditorProps = {
-	value: string[];
-	onChange: (next: string[]) => void;
-};
-
-function OwnerIdsEditor({ value, onChange }: OwnerIdsEditorProps) {
-	const [newOwnerId, setNewOwnerId] = useState("");
-
-	const updateOwnerId = (index: number, nextValue: string) => {
-		onChange(value.map((id, i) => (i === index ? nextValue.trim() : id)));
+function defaultNewFlag(): FeatureFlagDefinition {
+	const today = todayUnixSeconds();
+	return {
+		enabled: true,
+		created_at: today,
+		updated_at: today,
+		meta_data: undefined,
+		attributes: { allowedAccoutsOwnerIds: [] },
 	};
-
-	const removeOwnerId = (index: number) => {
-		onChange(value.filter((_, i) => i !== index));
-	};
-
-	const addOwnerIds = () => {
-		const parsed = parseOwnerIds(newOwnerId);
-		if (parsed.length === 0) {
-			return;
-		}
-		onChange([...value, ...parsed]);
-		setNewOwnerId("");
-	};
-
-	return (
-		<div className="space-y-3">
-			<div className="space-y-2">
-				{value.length > 0 ? (
-					value.map((ownerId, index) => (
-						<div
-							key={`${ownerId}-${index}`}
-							className="grid gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/50 sm:grid-cols-[1fr_auto]"
-						>
-							<input
-								value={ownerId}
-								onChange={(e) => updateOwnerId(index, e.target.value)}
-								className="rounded-md border border-zinc-300 bg-white px-3 py-2 font-mono text-xs text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-								placeholder="account owner id"
-							/>
-							<button
-								type="button"
-								onClick={() => removeOwnerId(index)}
-								className="rounded-md border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-							>
-								Remove
-							</button>
-						</div>
-					))
-				) : (
-					<div className="rounded-lg border border-dashed border-zinc-300 px-3 py-4 text-center text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-						No owner IDs added. Leave empty to allow the flag without this
-						attribute.
-					</div>
-				)}
-			</div>
-			<div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-				<input
-					value={newOwnerId}
-					onChange={(e) => setNewOwnerId(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter") {
-							e.preventDefault();
-							addOwnerIds();
-						}
-					}}
-					className="rounded-lg border border-zinc-300 px-3 py-2 font-mono text-xs text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-					placeholder="Paste one or many owner IDs"
-				/>
-				<button
-					type="button"
-					onClick={addOwnerIds}
-					className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-				>
-					Add owner ID
-				</button>
-			</div>
-			<p className="text-xs text-zinc-500 dark:text-zinc-400">
-				You can paste multiple IDs separated by commas, spaces, or new lines.
-			</p>
-		</div>
-	);
 }
+
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export default function FeatureFlagsAdmin() {
 	const [config, setConfig] = useState<FeatureFlagsConfig | null>(null);
+	const [baselineConfig, setBaselineConfig] =
+		useState<FeatureFlagsConfig | null>(null);
+	const [rowOrderBoost, setRowOrderBoost] = useState<string[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-	const [success, setSuccess] = useState<string | null>(null);
-	const [adminSecret, setAdminSecret] = useState("");
-
-	const [modalMode, setModalMode] = useState<ModalMode>("closed");
-	const [editKey, setEditKey] = useState("");
-	const [draftKey, setDraftKey] = useState("");
-	const [draft, setDraft] = useState<FeatureFlagDefinition | null>(null);
-	const searchParams = useSearchParams();
-	const userId = searchParams.get("userId") || "user1001";
-
-	const load = useCallback(async () => {
-		setLoading(true);
-		setError(null);
-		try {
-			const res = await fetch("/api/appconfig/config", {
-				method: "GET",
-				headers: {
-					"entity-id": userId, // stable id per user/account/session
-				},
-			});
-			const data: unknown = await res.json();
-			if (!res.ok) {
-				const err = data as { error?: string };
-				throw new Error(err.error ?? res.statusText);
-			}
-			setConfig(data as FeatureFlagsConfig);
-		} catch (e) {
-			setError(e instanceof Error ? e.message : "Failed to load");
-		} finally {
-			setLoading(false);
-		}
-	}, [userId]);
-
-	useEffect(() => {
-		void load();
-	}, [load]);
+	const [feedback, setFeedback] = useState<Feedback>(null);
+	const [modal, setModal] = useState<ModalState>(null);
+	const [showJsonModal, setShowJsonModal] = useState(false);
+	const [bulkImportOpen, setBulkImportOpen] = useState(false);
+	const [deleteConfirmKey, setDeleteConfirmKey] = useState<string | null>(null);
+	const [dirtyAction, setDirtyAction] = useState<DirtyAction | null>(null);
+	const [missingDeployment, setMissingDeployment] = useState(false);
+	const [selectedEnvironment, setSelectedEnvironment] =
+		useState<PublishEnvironment>(DEFAULT_PUBLISH_ENVIRONMENT);
 
 	const rows = useMemo(() => {
-		if (!config) {
-			return [];
+		if (!config) return [];
+		const boostFiltered = rowOrderBoost.filter((k) => k in config);
+		const boostSet = new Set(boostFiltered);
+		const rest = Object.entries(config)
+			.filter(([k]) => !boostSet.has(k))
+			.sort(([a], [b]) => a.localeCompare(b));
+		const boosted = boostFiltered.map(
+			(k) => [k, config[k]!] as [string, FeatureFlagDefinition]
+		);
+		return [...boosted, ...rest];
+	}, [config, rowOrderBoost]);
+
+	const hasDirty = useMemo(() => {
+		if (config === null || baselineConfig === null) return false;
+		return !configsAreEqual(config, baselineConfig);
+	}, [config, baselineConfig]);
+
+	const pendingKeys = useMemo(() => {
+		const s = new Set<string>();
+		if (!config || baselineConfig === null) return s;
+		for (const k of Object.keys(config)) {
+			if (!definitionsEqual(baselineConfig[k], config[k])) s.add(k);
 		}
-		return Object.entries(config.featureFlags).sort(([a], [b]) =>
-			a.localeCompare(b)
-		);
-	}, [config]);
+		return s;
+	}, [config, baselineConfig]);
+	const enabledCount = useMemo(
+		() => rows.filter(([, def]) => def.enabled).length,
+		[rows]
+	);
+	const disabledCount = rows.length - enabledCount;
+	const selectedEnvironmentLabel =
+		getPublishEnvironmentLabel(selectedEnvironment);
+	const canShowTable = config !== null;
+	const showEmptyDeploymentSplash =
+		missingDeployment && config !== null && Object.keys(config).length === 0;
 
-	const openAdd = () => {
-		const now = Math.floor(Date.now() / 1000);
-		setDraftKey("");
-		setEditKey("");
-		setDraft({
-			enabled: true,
-			created_at: now,
-			updated_at: now,
-			valid_until: undefined,
-			environment: "production",
-			meta_data: { version: "1", description: "" },
-			attributes: { allowedAccoutsOwnerIds: [] },
-		});
-		setModalMode("add");
-	};
+	// ── Data fetching ──────────────────────────────────────────────────────────
 
-	const openEdit = (key: string, def: FeatureFlagDefinition) => {
-		setEditKey(key);
-		setDraftKey(key);
-		setDraft(
-			cloneConfig({ featureFlags: { [key]: def } }).featureFlags[key] ?? null
-		);
-		setModalMode("edit");
-	};
-
-	const closeModal = () => {
-		setModalMode("closed");
-		setDraft(null);
-		setEditKey("");
-		setDraftKey("");
-	};
-
-	const saveFullConfig = async (next: FeatureFlagsConfig) => {
-		setSaving(true);
-		setError(null);
-		setSuccess(null);
-		try {
-			const headers: HeadersInit = {
-				"Content-Type": "application/json",
-			};
-			if (adminSecret.trim() !== "") {
-				headers["x-admin-secret"] = adminSecret.trim();
+	const load = useCallback(
+		async (opts?: { clearFeedback?: boolean }) => {
+			setLoading(true);
+			if (opts?.clearFeedback !== false) setFeedback(null);
+			setMissingDeployment(false);
+			try {
+				const res = await fetch(
+					`/api/appconfig/config?environment=${selectedEnvironment}`
+				);
+				const data: unknown = await res.json();
+				if (!res.ok)
+					throw new Error((data as { error?: string }).error ?? res.statusText);
+				const cfg = data as FeatureFlagsConfig;
+				setConfig(cfg);
+				setBaselineConfig(cloneConfig(cfg));
+				setRowOrderBoost([]);
+			} catch (e) {
+				const message = e instanceof Error ? e.message : msg.admin.loadFailed;
+				if (isMissingDeploymentError(message)) {
+					setMissingDeployment(true);
+					setConfig({});
+					setBaselineConfig({});
+					setRowOrderBoost([]);
+					setFeedback(null);
+				} else {
+					setConfig(null);
+					setBaselineConfig(null);
+					setRowOrderBoost([]);
+					setFeedback({
+						type: "error",
+						message,
+					});
+				}
+			} finally {
+				setLoading(false);
 			}
+		},
+		[selectedEnvironment]
+	);
+
+	useEffect(() => {
+		const timeoutId = window.setTimeout(() => {
+			void load();
+		}, 0);
+		return () => window.clearTimeout(timeoutId);
+	}, [load]);
+
+	// ── Mutations ──────────────────────────────────────────────────────────────
+
+	const switchEnvironment = useCallback((environment: PublishEnvironment) => {
+		setConfig(null);
+		setBaselineConfig(null);
+		setRowOrderBoost([]);
+		setFeedback(null);
+		setMissingDeployment(false);
+		setModal(null);
+		setShowJsonModal(false);
+		setBulkImportOpen(false);
+		setDirtyAction(null);
+		setSelectedEnvironment(environment);
+	}, []);
+
+	const runDirtyAction = useCallback(
+		(action: DirtyAction) => {
+			if (action.kind === "reload") {
+				void load();
+				return;
+			}
+			switchEnvironment(action.environment);
+		},
+		[load, switchEnvironment]
+	);
+
+	const requestDirtyAction = (action: DirtyAction) => {
+		if (!hasDirty) {
+			runDirtyAction(action);
+			return;
+		}
+		setDirtyAction(action);
+	};
+
+	const saveConfig = async (
+		next: FeatureFlagsConfig,
+		opts?: { afterSuccess?: () => void }
+	) => {
+		setSaving(true);
+		setFeedback(null);
+		try {
 			const res = await fetch("/api/appconfig/config", {
 				method: "PUT",
-				headers,
-				body: JSON.stringify(next),
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					environment: selectedEnvironment,
+					config: next,
+				}),
 			});
 			const data: unknown = await res.json();
-			if (!res.ok) {
-				const err = data as { error?: string };
-				throw new Error(err.error ?? res.statusText);
-			}
-			const ok = data as { versionNumber?: number };
-			setSuccess(
-				ok.versionNumber !== undefined
-					? `Published version ${ok.versionNumber}. Refresh may take a few seconds until deployment completes.`
-					: "Published."
+			if (!res.ok)
+				throw new Error((data as { error?: string }).error ?? res.statusText);
+
+			const { versionNumber } = data as { versionNumber?: number };
+			setModal(null);
+			setRowOrderBoost([]);
+			await load({ clearFeedback: false });
+			opts?.afterSuccess?.();
+			toast.success(
+				versionNumber != null
+					? msg.toast.deployedVersion(versionNumber, selectedEnvironmentLabel)
+					: msg.toast.deployed(selectedEnvironmentLabel)
 			);
-			setConfig(cloneConfig(next));
-			closeModal();
-			await load();
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Save failed");
+			const message = e instanceof Error ? e.message : msg.admin.saveFailed;
+			toast.error(message);
+			setFeedback({
+				type: "error",
+				message,
+			});
 		} finally {
 			setSaving(false);
 		}
 	};
 
-	const handleModalSubmit = () => {
-		if (!config || !draft) {
-			return;
-		}
-		const now = Math.floor(Date.now() / 1000);
-		const key = modalMode === "add" ? draftKey.trim() : editKey.trim();
-		if (!key) {
-			setError("Flag key is required.");
-			return;
-		}
-		if (!/^[a-zA-Z0-9_-]+$/.test(key)) {
-			setError(
-				"Flag key may only contain letters, numbers, underscore, and hyphen."
-			);
-			return;
-		}
-
+	const handleSubmit = () => {
+		if (!modal || config === null) return;
+		const key = modal.key.trim();
+		if (!key) return;
 		const next = cloneConfig(config);
-		const prev = next.featureFlags[key];
-		const metaVersion = draft.meta_data?.version?.trim();
-		const metaDesc = draft.meta_data?.description?.trim();
-		const meta =
-			metaVersion || metaDesc
-				? {
-						...(metaVersion ? { version: metaVersion } : {}),
-						...(metaDesc ? { description: metaDesc } : {}),
-				  }
-				: undefined;
-		const ownerIds = (draft.attributes?.allowedAccoutsOwnerIds ?? []).filter(
-			Boolean
-		);
-		const attributes =
-			ownerIds.length > 0 ? { allowedAccoutsOwnerIds: ownerIds } : undefined;
-
-		const updated: FeatureFlagDefinition = {
-			...draft,
-			updated_at: now,
-			created_at:
-				modalMode === "add" ? now : prev?.created_at ?? draft.created_at ?? now,
-			meta_data: meta,
-			attributes,
-		};
-
-		next.featureFlags[key] = updated;
-		void saveFullConfig(next);
+		if (modal.mode === "add") {
+			if (key in next) {
+				setFeedback({ type: "error", message: msg.admin.flagKeyExists });
+				return;
+			}
+			if (!FLAG_KEY_RE.test(key)) {
+				setFeedback({
+					type: "error",
+					message: msg.admin.flagKeyInvalid,
+				});
+				return;
+			}
+			next[key] = buildUpdatedFlag(modal.def, true, undefined);
+			setRowOrderBoost((p) => [key, ...p.filter((k) => k !== key)]);
+		} else {
+			next[key] = buildUpdatedFlag(modal.def, false, next[key]?.created_at);
+		}
+		setConfig(next);
+		setFeedback(null);
+		setModal(null);
+		if (modal.mode === "add") {
+			toast.success(msg.toast.flagAdded(key));
+		} else {
+			toast.success(msg.toast.flagUpdated(key));
+		}
 	};
 
-	const handleDelete = (key: string) => {
-		if (!config) {
-			return;
-		}
-		if (
-			typeof window !== "undefined" &&
-			!window.confirm(`Delete feature flag "${key}"?`)
-		) {
-			return;
-		}
-		const next = cloneConfig(config);
-		delete next.featureFlags[key];
-		void saveFullConfig(next);
+	const requestDeleteFlag = (key: string) => {
+		setDeleteConfirmKey(key);
 	};
+
+	const applyDeleteFlag = () => {
+		const key = deleteConfirmKey;
+		if (!key || !config) return;
+		const next = cloneConfig(config);
+		delete next[key];
+		setConfig(next);
+		setRowOrderBoost((p) => p.filter((k) => k !== key));
+		setDeleteConfirmKey(null);
+		toast.success(msg.toast.flagDeleted(key));
+	};
+
+	const handleDeploy = () => {
+		if (!config || !hasDirty) return;
+		void saveConfig(config);
+	};
+
+	const handleDirtyActionWithoutDeploy = () => {
+		if (!dirtyAction) return;
+		const nextAction = dirtyAction;
+		setDirtyAction(null);
+		runDirtyAction(nextAction);
+	};
+
+	const handleDirtyActionWithDeploy = () => {
+		if (!config || !dirtyAction) return;
+		const nextAction = dirtyAction;
+		setDirtyAction(null);
+		void saveConfig(config, {
+			afterSuccess:
+				nextAction.kind === "switch-environment"
+					? () => switchEnvironment(nextAction.environment)
+					: undefined,
+		});
+	};
+
+	// ─── Loading state ────────────────────────────────────────────────────────
 
 	if (loading && !config) {
 		return (
-			<div className="rounded-lg border border-zinc-200 bg-white p-8 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-				Loading configuration…
+			<div className="min-h-screen px-4 py-10 font-sans antialiased">
+				<div className="mx-auto max-w-7xl rounded-[28px] border border-[var(--border)] bg-[var(--surface-2)] p-10 text-sm text-[var(--muted)] shadow-[var(--shadow-xl)] backdrop-blur-xl">
+					{msg.admin.loadingConfig}
+				</div>
 			</div>
 		);
 	}
 
+	// ─── Render ───────────────────────────────────────────────────────────────
+
 	return (
-		<div className="mx-auto max-w-7xl space-y-6 px-4 py-10">
-			<div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-				<div>
-					<h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-						Feature flags
-					</h1>
-					<p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-						Read from AppConfig; publish creates a new hosted version and starts
-						a deployment. Set{" "}
-						<code className="rounded bg-zinc-100 px-1 dark:bg-zinc-900">
-							APPCONFIG_DEPLOYMENT_STRATEGY_ID
-						</code>{" "}
-						for writes.
-					</p>
-					<div className="mt-3 flex flex-wrap gap-2 text-xs">
-						<span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-							Entity: {userId}
-						</span>
-						<span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-							{rows.length} {rows.length === 1 ? "flag" : "flags"}
-						</span>
+		<div className="min-h-screen px-4 py-8 font-sans antialiased sm:px-6 lg:px-8">
+			<div className="mx-auto max-w-7xl space-y-6">
+				<div className="glass-panel data-grid overflow-visible rounded-[32px]">
+					<div className="flex flex-col gap-8 px-6 py-8 sm:px-8 lg:flex-row lg:items-end lg:justify-between">
+						<div className="max-w-3xl">
+							<div className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">
+								<span className="h-2 w-2 rounded-full bg-[var(--accent)] shadow-[0_0_16px_var(--accent)]" />
+								Flag control center
+							</div>
+							<h1 className="mt-5 font-display text-4xl tracking-[-0.04em] text-foreground sm:text-5xl">
+								{msg.admin.pageTitle}
+							</h1>
+							<p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--muted)] sm:text-base">
+								{msg.admin.targetEnvironmentHint}
+							</p>
+							<div className="mt-5 flex flex-wrap gap-3">
+								<span className="rounded-full border border-[var(--border)] bg-white/6 px-3 py-1.5 text-sm text-foreground">
+									{selectedEnvironmentLabel}
+								</span>
+								<span className="rounded-full border border-[var(--border)] bg-white/6 px-3 py-1.5 text-sm text-foreground">
+									{msg.admin.flagCount(rows.length)}
+								</span>
+							</div>
+						</div>
+
+						<div className="flex flex-wrap items-end gap-3">
+							<TargetEnvironmentSelect
+								value={selectedEnvironment}
+								onChange={(environment) => {
+									requestDirtyAction({
+										kind: "switch-environment",
+										environment,
+									});
+								}}
+							/>
+							<button
+								type="button"
+								onClick={() => {
+									requestDirtyAction({ kind: "reload" });
+								}}
+								disabled={loading}
+								className="rounded-full border border-[var(--border-strong)] bg-white/6 px-5 py-3 text-sm font-medium text-foreground hover:-translate-y-0.5 hover:border-[var(--accent)] hover:bg-white/10"
+							>
+								{msg.admin.reload}
+							</button>
+							<button
+								type="button"
+								onClick={handleDeploy}
+								disabled={saving || !hasDirty}
+								title={!hasDirty ? msg.admin.deployDisabledHint : undefined}
+								className={`rounded-full border px-5 py-3 text-sm font-semibold text-white shadow-[0_18px_30px_rgba(22,163,74,0.28)] ${
+									hasDirty && !saving
+										? "border-[rgba(74,222,128,0.45)] bg-[linear-gradient(135deg,#4ade80,#15803d)] hover:-translate-y-0.5 hover:shadow-[0_22px_38px_rgba(74,222,128,0.22)]"
+										: "cursor-not-allowed border-[var(--border)] bg-[rgba(34,197,94,0.22)] opacity-45"
+								}`}
+							>
+								{saving ? msg.modal.savePublishing : msg.admin.deploy}
+							</button>
+							<button
+								type="button"
+								onClick={() => setBulkImportOpen(true)}
+								disabled={!canShowTable}
+								className="rounded-full border border-[var(--border-strong)] bg-white/6 px-5 py-3 text-sm font-medium text-foreground hover:-translate-y-0.5 hover:border-[var(--accent)] hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+							>
+								{msg.admin.bulkImportOpen}
+							</button>
+							<button
+								type="button"
+								onClick={() =>
+									setModal({ mode: "add", key: "", def: defaultNewFlag() })
+								}
+								className="rounded-full border border-[rgba(125,211,252,0.35)] bg-[linear-gradient(135deg,#38bdf8,#2563eb)] px-5 py-3 text-sm font-semibold text-white shadow-[0_18px_30px_rgba(37,99,235,0.35)] hover:-translate-y-0.5 hover:shadow-[0_22px_38px_rgba(56,189,248,0.32)]"
+							>
+								{msg.admin.addFlag}
+							</button>
+						</div>
+					</div>
+
+					<div className="grid gap-4 border-t border-[var(--border)] px-6 py-6 sm:grid-cols-3 sm:px-8">
+						<StatCard
+							label="Enabled flags"
+							value={enabledCount}
+							tone="success"
+							helper={`${disabledCount} disabled`}
+						/>
+						<StatCard
+							label="Target environment"
+							value={selectedEnvironmentLabel}
+							tone="accent"
+							helper="Load and publish scope"
+						/>
+						<StatCard
+							label="Inspect payload"
+							value="JSON"
+							tone="warning"
+							helper="Open the raw configuration viewer"
+							onClick={() => setShowJsonModal(true)}
+						/>
 					</div>
 				</div>
-				<div className="flex flex-wrap gap-2">
-					<button
-						type="button"
-						onClick={() => void load()}
-						className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-900"
-					>
-						Reload
-					</button>
-					<button
-						type="button"
-						onClick={openAdd}
-						className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-					>
-						Add flag
-					</button>
-				</div>
-			</div>
 
-			<div className="grid gap-4 sm:grid-cols-2">
-				<label className="block text-sm">
-					<span className="font-medium text-zinc-700 dark:text-zinc-300">
-						Admin secret (optional)
-					</span>
-					<input
-						type="password"
-						autoComplete="off"
-						value={adminSecret}
-						onChange={(e) => setAdminSecret(e.target.value)}
-						placeholder="If APPCONFIG_ADMIN_SECRET is set on the server"
-						className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+				<div className="space-y-6">
+					{feedback ? (
+						<div
+							className={`rounded-[24px] border px-4 py-3 text-sm shadow-[var(--shadow-xl)] ${
+								feedback.type === "error"
+									? "border-[rgba(251,113,133,0.35)] bg-[rgba(79,18,31,0.72)] text-[#ffd5dd]"
+									: "border-[rgba(74,222,128,0.35)] bg-[rgba(14,55,34,0.76)] text-[#d8ffe6]"
+							}`}
+						>
+							{feedback.message}
+						</div>
+					) : null}
+
+					{canShowTable && !showEmptyDeploymentSplash ? (
+						<FlagTable
+							rows={rows}
+							saving={saving}
+							pendingKeys={pendingKeys}
+							onEdit={(key, def) =>
+								setModal({
+									mode: "edit",
+									key,
+									def: JSON.parse(JSON.stringify(def)) as FeatureFlagDefinition,
+								})
+							}
+							onDelete={requestDeleteFlag}
+						/>
+					) : null}
+
+					{showEmptyDeploymentSplash ? (
+						<EmptyDeploymentState
+							onCreate={() =>
+								setModal({
+									mode: "add",
+									key: "",
+									def: defaultNewFlag(),
+								})
+							}
+						/>
+					) : null}
+				</div>
+
+				{modal ? (
+					<FlagModal
+						mode={modal.mode}
+						flagKey={modal.key}
+						draft={modal.def}
+						saving={saving}
+						submitLabel={
+							modal.mode === "add"
+								? msg.modal.addToDraft
+								: msg.modal.saveLocalChanges
+						}
+						onKeyChange={(key) => setModal({ ...modal, key })}
+						onDraftChange={(def) => setModal({ ...modal, def })}
+						onSubmit={handleSubmit}
+						onClose={() => setModal(null)}
 					/>
-				</label>
-			</div>
-
-			{error ? (
-				<div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
-					{error}
-				</div>
-			) : null}
-			{success ? (
-				<div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-					{success}
-				</div>
-			) : null}
-
-			<div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-				<div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-						Hosted configuration
-					</h2>
-					<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-						Review targeting, metadata, and AppConfig timestamps before
-						publishing changes.
-					</p>
-				</div>
-				<div className="overflow-x-auto">
-					<table className="w-full min-w-[1180px] text-left text-sm">
-					<thead className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
-						<tr>
-							<th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">
-								Key
-							</th>
-							<th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">
-								Enabled
-							</th>
-							<th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">
-								Environment
-							</th>
-							<th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">
-								Version
-							</th>
-							<th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">
-								Created
-							</th>
-							<th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">
-								Updated
-							</th>
-							<th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">
-								Valid until
-							</th>
-							<th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">
-								Allowed owner IDs
-							</th>
-							<th className="px-4 py-3 font-medium text-zinc-700 dark:text-zinc-300">
-								Actions
-							</th>
-						</tr>
-					</thead>
-					<tbody>
-						{rows.map(([key, def]) => (
-							<tr
-								key={key}
-								className="border-b border-zinc-100 align-top transition hover:bg-zinc-50/80 dark:border-zinc-800/80 dark:hover:bg-zinc-900/40"
-							>
-								<td className="px-4 py-4">
-									<div className="font-mono text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-										{key}
-									</div>
-									{def.meta_data?.description ? (
-										<div className="mt-1 max-w-[240px] text-xs text-zinc-500 dark:text-zinc-400">
-											{def.meta_data.description}
-										</div>
-									) : null}
-								</td>
-								<td className="px-4 py-4 text-zinc-700 dark:text-zinc-300">
-									<span
-										className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-											def.enabled
-												? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900"
-												: "bg-zinc-100 text-zinc-600 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-400 dark:ring-zinc-800"
-										}`}
-									>
-										<span
-											className={`h-1.5 w-1.5 rounded-full ${
-												def.enabled ? "bg-emerald-500" : "bg-zinc-400"
-											}`}
-										/>
-										{def.enabled ? "Enabled" : "Disabled"}
-									</span>
-								</td>
-								<td className="px-4 py-4 text-zinc-700 dark:text-zinc-300">
-									<span className="rounded-md bg-zinc-100 px-2 py-1 font-mono text-xs text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-										{def.environment ?? "—"}
-									</span>
-								</td>
-								<td className="px-4 py-4 font-mono text-xs text-zinc-600 dark:text-zinc-400">
-									{def.meta_data?.version ?? "—"}
-								</td>
-								<td className="px-4 py-4 font-mono text-xs text-zinc-600 dark:text-zinc-400">
-									{formatUnixSeconds(def.created_at)}
-								</td>
-								<td className="px-4 py-4 font-mono text-xs text-zinc-600 dark:text-zinc-400">
-									{formatUnixSeconds(def.updated_at)}
-								</td>
-								<td className="px-4 py-4 font-mono text-xs text-zinc-600 dark:text-zinc-400">
-									{formatUnixSeconds(def.valid_until)}
-								</td>
-								<td className="max-w-[220px] px-4 py-4 text-xs text-zinc-600 dark:text-zinc-400">
-									{(def.attributes?.allowedAccoutsOwnerIds ?? []).join(", ") ||
-										"—"}
-								</td>
-								<td className="px-4 py-4">
-									<div className="flex flex-wrap gap-2">
-										<button
-											type="button"
-											onClick={() => openEdit(key, def)}
-											className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-										>
-											Edit
-										</button>
-										<button
-											type="button"
-											onClick={() => handleDelete(key)}
-											disabled={saving}
-											className="text-sm font-medium text-red-600 hover:underline dark:text-red-400"
-										>
-											Delete
-										</button>
-									</div>
-								</td>
-							</tr>
-						))}
-					</tbody>
-					</table>
-				</div>
-				{rows.length === 0 ? (
-					<p className="px-4 py-8 text-center text-zinc-500">
-						No flags yet. Add one or check AppConfig / IAM permissions.
-					</p>
 				) : null}
+
+				{bulkImportOpen && config ? (
+					<BulkImportModal
+						working={config}
+						saving={saving}
+						onApply={(next, newKeysInOrder) => {
+							setConfig(next);
+							setRowOrderBoost((p) => [
+								...newKeysInOrder,
+								...p.filter((k) => !newKeysInOrder.includes(k)),
+							]);
+							setFeedback(null);
+						}}
+						onClose={() => setBulkImportOpen(false)}
+					/>
+				) : null}
+
+				{showJsonModal ? (
+					<JsonPreviewModal
+						json={JSON.stringify(config ?? EMPTY_CONFIG, null, 2)}
+						onClose={() => setShowJsonModal(false)}
+					/>
+				) : null}
+
+				<ConfirmModal
+					open={dirtyAction !== null}
+					kicker={msg.admin.unsavedChangesModal.kicker}
+					title={msg.admin.unsavedChangesModal.title}
+					message={msg.admin.unsavedChangesModal.body}
+					confirmLabel={msg.admin.unsavedChangesModal.confirm}
+					secondaryLabel={msg.admin.unsavedChangesModal.reloadWithoutDeploy}
+					cancelLabel={msg.admin.unsavedChangesModal.cancel}
+					onConfirm={handleDirtyActionWithDeploy}
+					onSecondaryAction={handleDirtyActionWithoutDeploy}
+					onCancel={() => setDirtyAction(null)}
+				/>
+
+				<ConfirmModal
+					open={deleteConfirmKey !== null}
+					kicker={msg.admin.deleteModal.kicker}
+					title={msg.admin.deleteModal.title}
+					message={
+						deleteConfirmKey ? msg.admin.deleteModal.body(deleteConfirmKey) : ""
+					}
+					confirmLabel={msg.admin.deleteModal.confirm}
+					cancelLabel={msg.admin.deleteModal.cancel}
+					danger
+					onConfirm={applyDeleteFlag}
+					onCancel={() => setDeleteConfirmKey(null)}
+				/>
 			</div>
+		</div>
+	);
+}
 
-			<details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
-				<summary className="cursor-pointer text-sm font-medium text-zinc-800 dark:text-zinc-200">
-					Raw JSON
-				</summary>
-				<pre className="mt-3 max-h-96 overflow-auto rounded bg-white p-4 text-xs text-zinc-800 dark:bg-black dark:text-zinc-200">
-					{config ? JSON.stringify(config, null, 2) : ""}
-				</pre>
-			</details>
+function isMissingDeploymentError(message: string): boolean {
+	return /deployment not found/i.test(message);
+}
 
-			{modalMode !== "closed" && draft ? (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-					<div
-						className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-950"
-						role="dialog"
-						aria-modal="true"
-					>
-						<div className="border-b border-zinc-200 px-6 py-5 dark:border-zinc-800">
-							<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-								<div>
-									<h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-										{modalMode === "add" ? "Add feature flag" : `Edit ${editKey}`}
-									</h2>
-									<p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-										Configure rollout state, metadata, validity, and account owner
-										targeting.
-									</p>
-								</div>
+function StatCard({
+	label,
+	value,
+	helper,
+	tone,
+	onClick,
+}: {
+	label: string;
+	value: number | string;
+	helper: string;
+	tone: "accent" | "success" | "warning";
+	onClick?: () => void;
+}) {
+	const toneClass = {
+		accent:
+			"border-[rgba(125,211,252,0.18)] bg-[linear-gradient(180deg,rgba(20,37,64,0.84),rgba(10,20,38,0.76))]",
+		success:
+			"border-[rgba(74,222,128,0.18)] bg-[linear-gradient(180deg,rgba(11,46,32,0.8),rgba(8,28,23,0.72))]",
+		warning:
+			"border-[rgba(251,191,36,0.18)] bg-[linear-gradient(180deg,rgba(54,37,12,0.82),rgba(31,23,8,0.72))]",
+	} as const;
+
+	const Component = onClick ? "button" : "div";
+
+	return (
+		<Component
+			{...(onClick ? { type: "button", onClick } : {})}
+			className={`rounded-[24px] border p-5 text-left ${toneClass[tone]} ${
+				onClick
+					? "cursor-pointer hover:-translate-y-0.5 hover:border-[var(--border-strong)] focus:outline-none focus:ring-2 focus:ring-[rgba(56,189,248,0.28)]"
+					: ""
+			}`}
+		>
+			<p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
+				{label}
+			</p>
+			<div className="mt-3 font-display text-3xl tracking-[-0.04em] text-foreground">
+				{value}
+			</div>
+			<p className="mt-2 text-sm text-[var(--muted)]">{helper}</p>
+		</Component>
+	);
+}
+
+function TargetEnvironmentSelect({
+	value,
+	onChange,
+}: {
+	value: PublishEnvironment;
+	onChange: (value: PublishEnvironment) => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const rootRef = useRef<HTMLDivElement | null>(null);
+	const selected = publishEnvironmentOptions.find(
+		(option) => option.value === value
+	);
+
+	useEffect(() => {
+		if (!open) return;
+
+		const handlePointerDown = (event: MouseEvent) => {
+			if (!rootRef.current?.contains(event.target as Node)) {
+				setOpen(false);
+			}
+		};
+
+		const handleEscape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setOpen(false);
+		};
+
+		document.addEventListener("mousedown", handlePointerDown);
+		document.addEventListener("keydown", handleEscape);
+		return () => {
+			document.removeEventListener("mousedown", handlePointerDown);
+			document.removeEventListener("keydown", handleEscape);
+		};
+	}, [open]);
+
+	return (
+		<div
+			ref={rootRef}
+			className={`relative min-w-[220px] ${open ? "z-[90]" : "z-10"}`}
+		>
+			<span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+				{msg.admin.targetEnvironmentLabel}
+			</span>
+			<button
+				type="button"
+				aria-haspopup="listbox"
+				aria-expanded={open}
+				onClick={() => setOpen((prev) => !prev)}
+				className={`flex w-full items-center justify-between gap-3 rounded-[20px] border px-4 py-3 text-left text-sm text-foreground shadow-[0_12px_28px_rgba(2,6,23,0.18)] outline-none ${
+					open
+						? "border-[var(--accent)] bg-[rgba(12,24,44,0.98)] ring-2 ring-[rgba(56,189,248,0.22)]"
+						: "border-[var(--border)] bg-[linear-gradient(180deg,rgba(20,36,61,0.88),rgba(11,21,39,0.92))] hover:border-[var(--border-strong)] hover:bg-[linear-gradient(180deg,rgba(24,42,71,0.92),rgba(12,24,44,0.96))]"
+				}`}
+			>
+				<div className="min-w-0 font-display text-lg tracking-[-0.03em] text-foreground sm:text-xl">
+					{selected?.label ?? value}
+				</div>
+				<span
+					className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-white/6 text-[var(--accent)] transition ${
+						open ? "rotate-180 border-[var(--accent)] bg-[var(--accent-soft)]" : ""
+					}`}
+					aria-hidden
+				>
+					<ChevronDownIcon />
+				</span>
+			</button>
+
+			{open ? (
+				<div className="absolute left-0 right-0 top-[calc(100%+0.6rem)] z-[95] overflow-hidden rounded-[22px] border border-[var(--border-strong)] bg-[linear-gradient(180deg,rgba(20,36,61,0.98),rgba(10,20,38,0.98))] p-2 shadow-[0_24px_54px_rgba(1,10,24,0.52)] backdrop-blur-xl">
+					<div role="listbox" aria-label={msg.admin.targetEnvironmentLabel} className="space-y-1">
+						{publishEnvironmentOptions.map((option) => {
+							const active = option.value === value;
+							return (
 								<button
+									key={option.value}
 									type="button"
-									aria-pressed={draft.enabled}
-									onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
-									className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold ring-1 transition ${
-										draft.enabled
-											? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900"
-											: "bg-zinc-100 text-zinc-600 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-800"
+									role="option"
+									aria-selected={active}
+									onClick={() => {
+										setOpen(false);
+										if (!active) onChange(option.value);
+									}}
+									className={`flex w-full items-center justify-between rounded-[16px] px-3.5 py-2.5 text-left ${
+										active
+											? "bg-[linear-gradient(135deg,rgba(56,189,248,0.22),rgba(37,99,235,0.16))] text-foreground"
+											: "text-[var(--muted)] hover:bg-white/7 hover:text-foreground"
 									}`}
 								>
-									<span
-										className={`flex h-5 w-9 items-center rounded-full p-0.5 transition ${
-											draft.enabled
-												? "bg-emerald-500"
-												: "bg-zinc-400 dark:bg-zinc-700"
-										}`}
-									>
-										<span
-											className={`h-4 w-4 rounded-full bg-white shadow-sm transition ${
-												draft.enabled ? "translate-x-4" : "translate-x-0"
-											}`}
-										/>
-									</span>
-									{draft.enabled ? "Enabled" : "Disabled"}
+									<div className="font-display text-lg tracking-[-0.03em] sm:text-xl">
+										{option.label}
+									</div>
+									{active ? (
+										<span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[rgba(125,211,252,0.28)] bg-[rgba(56,189,248,0.16)] text-[var(--accent)]">
+											<CheckIcon />
+										</span>
+									) : null}
 								</button>
-							</div>
-						</div>
-						<div className="space-y-5 p-6">
-							{modalMode === "add" ? (
-								<label className="block text-sm">
-									<span className="font-medium text-zinc-700 dark:text-zinc-300">
-										Key
-									</span>
-									<input
-										value={draftKey}
-										onChange={(e) => setDraftKey(e.target.value)}
-										className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-mono text-zinc-900 shadow-sm dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-										placeholder="e.g. limit_order"
-									/>
-								</label>
-							) : null}
-
-							<div className="grid gap-4 sm:grid-cols-2">
-								<label className="block text-sm">
-									<span className="font-medium text-zinc-700 dark:text-zinc-300">
-										Environment
-									</span>
-									<input
-										value={draft.environment ?? ""}
-										onChange={(e) =>
-											setDraft({
-												...draft,
-												environment: e.target.value.trim() || undefined,
-											})
-										}
-										className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 shadow-sm dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-										placeholder="production"
-									/>
-								</label>
-
-								<label className="block text-sm">
-									<span className="font-medium text-zinc-700 dark:text-zinc-300">
-										Valid until (local)
-									</span>
-									<input
-										type="datetime-local"
-										value={unixSecondsToDatetimeLocal(draft.valid_until)}
-										onChange={(e) =>
-											setDraft({
-												...draft,
-												valid_until: datetimeLocalToUnixSeconds(e.target.value),
-											})
-										}
-										className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 shadow-sm dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-									/>
-								</label>
-							</div>
-
-							<div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
-								<div className="mb-3">
-									<h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-										Metadata
-									</h3>
-									<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-										Version is visible in the table for faster review.
-									</p>
-								</div>
-								<label className="block text-sm">
-									<span className="font-medium text-zinc-700 dark:text-zinc-300">
-										Version
-									</span>
-									<input
-										value={draft.meta_data?.version ?? ""}
-										onChange={(e) =>
-											setDraft({
-												...draft,
-												meta_data: {
-													...draft.meta_data,
-													version: e.target.value,
-												},
-											})
-										}
-										className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-										placeholder="1"
-									/>
-								</label>
-
-								<label className="mt-4 block text-sm">
-									<span className="font-medium text-zinc-700 dark:text-zinc-300">
-										Description
-									</span>
-									<textarea
-										value={draft.meta_data?.description ?? ""}
-										onChange={(e) =>
-											setDraft({
-												...draft,
-												meta_data: {
-													...draft.meta_data,
-													description: e.target.value,
-												},
-											})
-										}
-										rows={3}
-										className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-										placeholder="What this flag controls"
-									/>
-								</label>
-							</div>
-
-							<div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-								<div className="mb-3">
-									<h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-										Allowed account owner IDs
-									</h3>
-									<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-										Add each owner ID as its own row, similar to environment
-										variable editors.
-									</p>
-								</div>
-								<OwnerIdsEditor
-									value={draft.attributes?.allowedAccoutsOwnerIds ?? []}
-									onChange={(ownerIds) =>
-										setDraft({
-											...draft,
-											attributes: {
-												...draft.attributes,
-												allowedAccoutsOwnerIds: ownerIds,
-											},
-										})
-									}
-								/>
-							</div>
-						</div>
-
-						<div className="flex justify-end gap-2 border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
-							<button
-								type="button"
-								onClick={closeModal}
-								className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-900"
-							>
-								Cancel
-							</button>
-							<button
-								type="button"
-								disabled={saving}
-								onClick={() => handleModalSubmit()}
-								className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
-							>
-								{saving ? "Publishing…" : "Save & deploy"}
-							</button>
-						</div>
+							);
+						})}
 					</div>
 				</div>
 			) : null}
+		</div>
+	);
+}
+
+function JsonPreviewModal({
+	json,
+	onClose,
+}: {
+	json: string;
+	onClose: () => void;
+}) {
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(2,6,23,0.72)] p-4 backdrop-blur-md">
+			<div
+				className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-[30px] border border-[var(--border)] bg-[linear-gradient(180deg,rgba(15,28,48,0.98),rgba(8,18,35,0.98))] shadow-[var(--shadow-xl)]"
+				role="dialog"
+				aria-modal="true"
+			>
+				<div className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
+					<div>
+						<p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--accent)]">
+							Inspect payload
+						</p>
+						<h2 className="mt-2 font-display text-3xl tracking-[-0.04em] text-foreground">
+							{msg.admin.rawJsonSummary}
+						</h2>
+					</div>
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-full border border-[var(--border-strong)] bg-white/6 px-4 py-2 text-sm font-medium text-foreground hover:border-[var(--accent)] hover:bg-white/10"
+					>
+						Close
+					</button>
+				</div>
+				<div className="p-6">
+					<pre className="max-h-[65vh] overflow-auto rounded-[22px] border border-[var(--border)] bg-black/20 p-4 font-mono text-[11px] leading-6 text-[#d9e8fb]">
+						{json}
+					</pre>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function ChevronDownIcon() {
+	return (
+		<svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+			<path
+				d="M5 7.5L10 12.5L15 7.5"
+				stroke="currentColor"
+				strokeWidth="1.8"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			/>
+		</svg>
+	);
+}
+
+function CheckIcon() {
+	return (
+		<svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+			<path
+				d="M5 10.5L8.5 14L15 7.5"
+				stroke="currentColor"
+				strokeWidth="2"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			/>
+		</svg>
+	);
+}
+
+function EmptyDeploymentState({ onCreate }: { onCreate: () => void }) {
+	return (
+		<div className="glass-panel rounded-[28px] px-6 py-12 text-center">
+			<p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">
+				{msg.admin.noDeploymentTitle}
+			</p>
+			<h2 className="mt-3 font-display text-3xl tracking-[-0.04em] text-foreground">
+				{msg.admin.createFeatureFlags}
+			</h2>
+			<p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">
+				{msg.admin.noDeploymentHint}
+			</p>
+			<button
+				type="button"
+				onClick={onCreate}
+				className="mt-6 rounded-full border border-[rgba(125,211,252,0.35)] bg-[linear-gradient(135deg,#38bdf8,#2563eb)] px-6 py-3 text-sm font-semibold text-white shadow-[0_18px_30px_rgba(37,99,235,0.35)] hover:-translate-y-0.5 hover:shadow-[0_22px_38px_rgba(56,189,248,0.32)]"
+			>
+				{msg.admin.createFeatureFlags}
+			</button>
 		</div>
 	);
 }

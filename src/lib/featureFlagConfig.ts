@@ -11,16 +11,16 @@ type LegacyFlag = FeatureFlagDefinition & {
 export function normalizeFeatureFlagsConfig(
 	input: FeatureFlagsConfig,
 ): FeatureFlagsConfig {
-	const featureFlags: Record<string, FeatureFlagDefinition> = {};
-	for (const [name, raw] of Object.entries(input.featureFlags)) {
+	const out: FeatureFlagsConfig = {};
+	for (const [name, raw] of Object.entries(input)) {
 		const legacy = raw as LegacyFlag;
 		const { metaData, ...rest } = legacy;
-		featureFlags[name] = {
+		out[name] = {
 			...rest,
 			meta_data: rest.meta_data ?? metaData,
 		};
 	}
-	return { featureFlags };
+	return out;
 }
 
 export function serializeFeatureFlagsConfig(config: FeatureFlagsConfig): string {
