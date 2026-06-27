@@ -11,9 +11,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const APP_CONFIG_ENVIRONMENT_IDS: Record<PublishEnvironment, string> = {
-	pre_prod: "y17en27",
-	prod: "uveliyh",
-	stage: "7t9i764",
+	stage: "dspap8e",
+	pre_prod: "hh5gvfd",
+	prod: "yreb557",
 };
 
 function isAuthorized(request: NextRequest): boolean {
@@ -23,13 +23,6 @@ function isAuthorized(request: NextRequest): boolean {
 	}
 	const header = request.headers.get("x-admin-secret");
 	return header === secret;
-}
-
-function readEntityId(request: NextRequest): string | undefined {
-	const id =
-		request.headers.get("entity-id") ??
-		request.headers.get("x-entity-id");
-	return id === null || id === "" ? undefined : id;
 }
 
 function readSelectedEnvironment(request: NextRequest): PublishEnvironment {
@@ -67,7 +60,6 @@ export async function GET(request: NextRequest) {
 	try {
 		const environment = readSelectedEnvironment(request);
 		const config = await fetchAppConfigJson({
-			entityId: readEntityId(request),
 			environmentId: resolveEnvironmentId(environment),
 		});
 		return NextResponse.json(config);

@@ -23,22 +23,22 @@ Hosted JSON uses snake_case fields aligned with AppConfig storage, for example:
 
 ```json
 {
-  "featureFlags": {
-    "limit_order": {
-      "enabled": true,
-      "created_at": 1743868800,
-      "updated_at": 1743868800,
-      "valid_until": 1743868800,
-      "environment": "production",
-      "meta_data": {
-        "version": "1",
-        "description": "Enable limit order"
-      },
-      "attributes": {
-        "allowedAccoutsOwnerIds": ["1234567890"]
-      }
-    }
-  }
+	"featureFlags": {
+		"limit_order": {
+			"enabled": true,
+			"created_at": 1743868800,
+			"updated_at": 1743868800,
+			"valid_until": 1743868800,
+			"environment": "production",
+			"meta_data": {
+				"version": "1",
+				"description": "Enable limit order"
+			},
+			"attributes": {
+				"allowedAccountOwnerIds": ["1234567890"]
+			}
+		}
+	}
 }
 ```
 

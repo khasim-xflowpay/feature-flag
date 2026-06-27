@@ -34,7 +34,17 @@ export function FlagTable({
 			</div>
 
 			<div className="overflow-x-auto">
-				<table className="w-full min-w-[1040px] text-left text-sm">
+				<table className="w-full min-w-[1180px] table-fixed text-left text-sm">
+					<colgroup>
+						<col className="w-[26%]" />
+						<col className="w-[9%]" />
+						<col className="w-[8%]" />
+						<col className="w-[10%]" />
+						<col className="w-[10%]" />
+						<col className="w-[10%]" />
+						<col className="w-[17%]" />
+						<col className="w-[10%]" />
+					</colgroup>
 					<thead className="border-b border-[var(--border)] bg-white/5">
 						<tr>
 							{msg.table.headers.map((h, i) => (
@@ -91,7 +101,7 @@ export function FlagTable({
 									<EnabledBadge enabled={def.enabled} />
 								</td>
 
-								<td className="px-5 py-5 text-sm text-foreground sm:px-6">
+								<td className="px-5 py-5 text-sm text-center text-foreground sm:px-6">
 									{def.meta_data?.version ?? msg.table.missingValue}
 								</td>
 
@@ -107,13 +117,15 @@ export function FlagTable({
 									{formatUnixSecondsDate(def.valid_until)}
 								</td>
 
-								<td className="max-w-[220px] px-5 py-5 text-xs leading-6 text-[var(--muted)] sm:px-6">
-									{(def.attributes?.allowedAccoutsOwnerIds ?? []).join(", ") ||
-										msg.table.missingValue}
+								<td className="px-5 py-5 text-xs leading-6 text-[var(--muted)] sm:px-6">
+									<div className="whitespace-normal break-all [overflow-wrap:anywhere]">
+										{(def.attributes?.allowedAccountOwnerIds ?? []).join(", ") ||
+											msg.table.missingValue}
+									</div>
 								</td>
 
 								<td className="px-5 py-5 sm:px-6">
-									<div className="flex flex-wrap gap-3">
+									<div className="flex flex-col min-w-[140px] flex-wrap gap-3">
 										<button
 											type="button"
 											onClick={() => onEdit(key, def)}

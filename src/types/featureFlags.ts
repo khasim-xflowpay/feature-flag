@@ -9,7 +9,7 @@ export interface FeatureFlagAttributes {
 	countries?: string[];
 	blackListedAccounts?: string[];
 	/** Typo preserved for configs stored in AppConfig */
-	allowedAccoutsOwnerIds?: string[];
+	allowedAccountOwnerIds?: string[];
 }
 
 export interface FeatureFlagDefinition {

@@ -63,7 +63,7 @@ export async function publishHostedConfigurationJson(
 			ConfigurationProfileId: ids.profileId,
 			Content: content,
 			ContentType: "application/json",
-			Description: `Admin publish ${new Date().toISOString()}`,
+			Description: `Published from feature-flags admin UI ${new Date().toISOString()}`,
 		}),
 	);
 

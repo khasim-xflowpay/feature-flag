@@ -229,12 +229,12 @@ export function FlagModal({
 							{msg.modal.ownerIdsHint}
 						</p>
 						<OwnerIdsEditor
-							value={draft.attributes?.allowedAccoutsOwnerIds ?? []}
+							value={draft.attributes?.allowedAccountOwnerIds ?? []}
 							onChange={(ids) =>
 								patch({
 									attributes: {
 										...draft.attributes,
-										allowedAccoutsOwnerIds: ids,
+										allowedAccountOwnerIds: ids,
 									},
 								})
 							}

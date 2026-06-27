@@ -79,9 +79,12 @@ export function buildUpdatedFlag(
 				}
 			: undefined;
 
+	const attrsFromDraft = draft.attributes;
 	const ownerIds = dedupeOwnerIds(
-		draft.attributes?.allowedAccoutsOwnerIds ?? []
+		attrsFromDraft?.allowedAccountOwnerIds ?? []
 	);
+	const includeAttributes =
+		attrsFromDraft !== undefined || ownerIds.length > 0;
 
 	return {
 		...draft,
@@ -91,6 +94,8 @@ export function buildUpdatedFlag(
 			: normalizeUnixSecondsToDate(prevCreatedAt ?? draft.created_at) ?? today,
 		valid_until: normalizeUnixSecondsToDate(draft.valid_until),
 		meta_data: meta,
-		attributes: ownerIds.length > 0 ? { allowedAccoutsOwnerIds: ownerIds } : undefined,
+		attributes: includeAttributes
+			? { ...(attrsFromDraft ?? {}), allowedAccountOwnerIds: ownerIds }
+			: undefined,
 	};
 }

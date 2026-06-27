@@ -55,7 +55,7 @@ function validateAttributes(v: unknown): string | null {
 		"accountTypes",
 		"countries",
 		"blackListedAccounts",
-		"allowedAccoutsOwnerIds",
+		"allowedAccountOwnerIds",
 	]);
 	for (const k of Object.keys(o)) {
 		if (!allowed.has(k)) return `attributes has unknown field "${k}".`;
@@ -65,7 +65,7 @@ function validateAttributes(v: unknown): string | null {
 		"accountTypes",
 		"countries",
 		"blackListedAccounts",
-		"allowedAccoutsOwnerIds",
+		"allowedAccountOwnerIds",
 	] as const) {
 		const err = validateStringArrayField(o, key);
 		if (err) return err;
@@ -118,38 +118,31 @@ export function normalizeMetaData(
 	return { ...(version ? { version } : {}), ...(description ? { description } : {}) };
 }
 
+const NORMALIZE_ATTR_ARRAY_KEYS = [
+	"allowedAccounts",
+	"accountTypes",
+	"countries",
+	"blackListedAccounts",
+	"allowedAccountOwnerIds",
+] as const;
+
 export function normalizeAttributes(
 	v: unknown,
 ): FeatureFlagAttributes | undefined {
 	if (v === undefined) return undefined;
 	if (typeof v !== "object" || v === null) return undefined;
 	const o = v as Record<string, unknown>;
-	const pick = (key: string): string[] | undefined => {
+	const out: Partial<
+		Record<(typeof NORMALIZE_ATTR_ARRAY_KEYS)[number], string[]>
+	> = {};
+	for (const key of NORMALIZE_ATTR_ARRAY_KEYS) {
+		if (!Object.prototype.hasOwnProperty.call(o, key)) continue;
 		const raw = o[key];
-		if (!Array.isArray(raw)) return undefined;
-		const strings = raw.filter((x): x is string => typeof x === "string");
-		return strings.length > 0 ? strings : undefined;
-	};
-	const allowedAccounts = pick("allowedAccounts");
-	const accountTypes = pick("accountTypes");
-	const countries = pick("countries");
-	const blackListedAccounts = pick("blackListedAccounts");
-	const allowedAccoutsOwnerIds = pick("allowedAccoutsOwnerIds");
-	if (
-		!allowedAccounts &&
-		!accountTypes &&
-		!countries &&
-		!blackListedAccounts &&
-		!allowedAccoutsOwnerIds
-	)
-		return undefined;
-	return {
-		...(allowedAccounts ? { allowedAccounts } : {}),
-		...(accountTypes ? { accountTypes } : {}),
-		...(countries ? { countries } : {}),
-		...(blackListedAccounts ? { blackListedAccounts } : {}),
-		...(allowedAccoutsOwnerIds ? { allowedAccoutsOwnerIds } : {}),
-	};
+		if (!Array.isArray(raw)) continue;
+		out[key] = raw.filter((x): x is string => typeof x === "string");
+	}
+	if (Object.keys(out).length === 0) return undefined;
+	return out as FeatureFlagAttributes;
 }
 
 export function normalizeFeatureFlagDefinition(

@@ -50,7 +50,7 @@ function defaultNewFlag(): FeatureFlagDefinition {
 		created_at: today,
 		updated_at: today,
 		meta_data: undefined,
-		attributes: { allowedAccoutsOwnerIds: [] },
+		attributes: { allowedAccountOwnerIds: [] },
 	};
 }
 
@@ -641,7 +641,9 @@ function TargetEnvironmentSelect({
 				</div>
 				<span
 					className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-white/6 text-[var(--accent)] transition ${
-						open ? "rotate-180 border-[var(--accent)] bg-[var(--accent-soft)]" : ""
+						open
+							? "rotate-180 border-[var(--accent)] bg-[var(--accent-soft)]"
+							: ""
 					}`}
 					aria-hidden
 				>
@@ -651,7 +653,11 @@ function TargetEnvironmentSelect({
 
 			{open ? (
 				<div className="absolute left-0 right-0 top-[calc(100%+0.6rem)] z-[95] overflow-hidden rounded-[22px] border border-[var(--border-strong)] bg-[linear-gradient(180deg,rgba(20,36,61,0.98),rgba(10,20,38,0.98))] p-2 shadow-[0_24px_54px_rgba(1,10,24,0.52)] backdrop-blur-xl">
-					<div role="listbox" aria-label={msg.admin.targetEnvironmentLabel} className="space-y-1">
+					<div
+						role="listbox"
+						aria-label={msg.admin.targetEnvironmentLabel}
+						className="space-y-1"
+					>
 						{publishEnvironmentOptions.map((option) => {
 							const active = option.value === value;
 							return (
