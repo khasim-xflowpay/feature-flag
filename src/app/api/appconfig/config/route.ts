@@ -5,6 +5,8 @@ import {
 } from "@/app/admin/feature-flags/publishEnvironments";
 import { fetchAppConfigJson } from "@/appconfig/fetchConfig";
 import { publishHostedConfigurationJson } from "@/appconfig/deployHostedConfig";
+import { normalizeFeatureFlagsConfig } from "@/lib/featureFlagConfig";
+import type { FeatureFlagsConfig } from "@/types/featureFlags";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -59,9 +61,10 @@ function readEnvironmentFromBody(body: unknown): PublishEnvironment {
 export async function GET(request: NextRequest) {
 	try {
 		const environment = readSelectedEnvironment(request);
-		const config = await fetchAppConfigJson({
+		const raw = await fetchAppConfigJson({
 			environmentId: resolveEnvironmentId(environment),
 		});
+		const config = normalizeFeatureFlagsConfig(raw as FeatureFlagsConfig);
 		return NextResponse.json(config);
 	} catch (err) {
 		console.error("[appconfig] fetch failed", err);

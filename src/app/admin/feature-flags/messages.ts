@@ -118,6 +118,11 @@ export const featureFlagsMessages = {
 		missingValue: "—",
 		pendingTooltip:
 			"This flag has local changes that differ from the last loaded version and have not been deployed yet.",
+		ownerIdsPreviewLimit: 3,
+		ownerIdsShowMore: (count: number) => `Show ${count} more`,
+		ownerIdsShowLess: "Show less",
+		ownerIdsCount: (count: number) =>
+			`${count} ${count === 1 ? "owner" : "owners"}`,
 	},
 
 	ownerIds: {
