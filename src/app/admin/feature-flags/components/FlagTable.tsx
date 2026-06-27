@@ -159,9 +159,9 @@ function FlagRow({
 						<span className="block truncate font-mono text-[13px] font-medium text-foreground">
 							{flagKey}
 						</span>
-						{def.meta_data?.description ? (
+						{def.metadata?.description ? (
 							<TruncatedText
-								text={def.meta_data.description}
+								text={def.metadata.description}
 								className="mt-0.5 text-xs text-[var(--muted)]"
 								maxWidth="200px"
 							/>
@@ -182,23 +182,23 @@ function FlagRow({
 			{/* Version */}
 			<td className="px-3 py-3.5 text-center align-top">
 				<span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-md bg-white/[0.06] px-1.5 font-mono text-xs text-[var(--muted)]">
-					{def.meta_data?.version ?? msg.table.missingValue}
+					{def.metadata?.version ?? msg.table.missingValue}
 				</span>
 			</td>
 
 			{/* Created */}
 			<td className="px-3 py-3.5 align-top">
-				<DateCell value={def.created_at} />
+				<DateCell value={def.createdAt} />
 			</td>
 
 			{/* Updated */}
 			<td className="px-3 py-3.5 align-top">
-				<DateCell value={def.updated_at} />
+				<DateCell value={def.updatedAt} />
 			</td>
 
 			{/* Valid until */}
 			<td className="px-3 py-3.5 align-top">
-				<DateCell value={def.valid_until} />
+				<DateCell value={def.validUntil} />
 			</td>
 
 			{/* Owner IDs */}

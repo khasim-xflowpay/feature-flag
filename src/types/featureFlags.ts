@@ -1,5 +1,5 @@
 export interface FeatureFlagMetaData {
-	version?: string;
+	version?: string | number;
 	description?: string;
 }
 
@@ -14,10 +14,10 @@ export interface FeatureFlagAttributes {
 
 export interface FeatureFlagDefinition {
 	enabled: boolean;
-	created_at?: number;
-	updated_at?: number;
-	valid_until?: number;
-	meta_data?: FeatureFlagMetaData;
+	createdAt?: number;
+	updatedAt?: number;
+	validUntil?: number;
+	metadata?: FeatureFlagMetaData;
 	attributes?: FeatureFlagAttributes;
 }
 

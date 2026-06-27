@@ -4,23 +4,35 @@ import type {
 } from "@/types/featureFlags";
 
 type LegacyFlag = FeatureFlagDefinition & {
-	metaData?: FeatureFlagDefinition["meta_data"];
-	validUntil?: number;
-	createdAt?: number;
-	updatedAt?: number;
+	meta_data?: FeatureFlagDefinition["metadata"];
+	metaData?: FeatureFlagDefinition["metadata"];
+	created_at?: number;
+	updated_at?: number;
+	valid_until?: number;
 };
 
-/** Normalize legacy camelCase fields from AppConfig into snake_case. */
+/** Normalize legacy snake_case fields from AppConfig into camelCase. */
 export function normalizeFeatureFlagDefinitionFromLegacy(
 	raw: LegacyFlag,
 ): FeatureFlagDefinition {
-	const { metaData, validUntil, createdAt, updatedAt, ...rest } = raw;
+	const {
+		meta_data,
+		metaData,
+		validUntil,
+		createdAt,
+		updatedAt,
+		created_at,
+		updated_at,
+		valid_until,
+		metadata,
+		...rest
+	} = raw;
 	return {
 		...rest,
-		created_at: rest.created_at ?? createdAt,
-		updated_at: rest.updated_at ?? updatedAt,
-		valid_until: rest.valid_until ?? validUntil,
-		meta_data: rest.meta_data ?? metaData,
+		createdAt: createdAt ?? created_at,
+		updatedAt: updatedAt ?? updated_at,
+		validUntil: validUntil ?? valid_until,
+		metadata: metadata ?? metaData ?? meta_data,
 	};
 }
 

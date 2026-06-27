@@ -62,6 +62,55 @@ export function dedupeOwnerIds(ids: string[]): string[] {
 	return next;
 }
 
+function normalizeMetaVersion(
+	version: string | number | undefined,
+): string | number | undefined {
+	if (version === undefined) return undefined;
+	if (typeof version === "number") {
+		return Number.isFinite(version) ? version : undefined;
+	}
+	const trimmed = version.trim();
+	return trimmed !== "" ? trimmed : undefined;
+}
+
+/** Compare only fields editable in the flag modal (ignores timestamps). */
+export function modalDraftEqualsStored(
+	draft: FeatureFlagDefinition,
+	stored: FeatureFlagDefinition,
+): boolean {
+	if (draft.enabled !== stored.enabled) return false;
+
+	if (
+		normalizeUnixSecondsToDate(draft.validUntil) !==
+		normalizeUnixSecondsToDate(stored.validUntil)
+	) {
+		return false;
+	}
+
+	const draftVersion = normalizeMetaVersion(draft.metadata?.version);
+	const storedVersion = normalizeMetaVersion(stored.metadata?.version);
+	if (String(draftVersion ?? "") !== String(storedVersion ?? "")) {
+		return false;
+	}
+
+	const draftDesc = draft.metadata?.description?.trim() ?? "";
+	const storedDesc = stored.metadata?.description?.trim() ?? "";
+	if (draftDesc !== storedDesc) return false;
+
+	const draftIds = dedupeOwnerIds(
+		draft.attributes?.allowedAccountOwnerIds ?? [],
+	);
+	const storedIds = dedupeOwnerIds(
+		stored.attributes?.allowedAccountOwnerIds ?? [],
+	);
+	if (draftIds.length !== storedIds.length) return false;
+	for (let i = 0; i < draftIds.length; i++) {
+		if (draftIds[i] !== storedIds[i]) return false;
+	}
+
+	return true;
+}
+
 export function buildUpdatedFlag(
 	draft: FeatureFlagDefinition,
 	isAdd: boolean,
@@ -69,8 +118,8 @@ export function buildUpdatedFlag(
 ): FeatureFlagDefinition {
 	const today = todayUnixSeconds();
 
-	const metaVersion = draft.meta_data?.version?.trim();
-	const metaDesc = draft.meta_data?.description?.trim();
+	const metaVersion = normalizeMetaVersion(draft.metadata?.version);
+	const metaDesc = draft.metadata?.description?.trim();
 	const meta =
 		metaVersion || metaDesc
 			? {
@@ -88,12 +137,12 @@ export function buildUpdatedFlag(
 
 	return {
 		...draft,
-		updated_at: today,
-		created_at: isAdd
+		updatedAt: today,
+		createdAt: isAdd
 			? today
-			: normalizeUnixSecondsToDate(prevCreatedAt ?? draft.created_at) ?? today,
-		valid_until: normalizeUnixSecondsToDate(draft.valid_until),
-		meta_data: meta,
+			: normalizeUnixSecondsToDate(prevCreatedAt ?? draft.createdAt) ?? today,
+		validUntil: normalizeUnixSecondsToDate(draft.validUntil),
+		metadata: meta,
 		attributes: includeAttributes
 			? { ...(attrsFromDraft ?? {}), allowedAccountOwnerIds: ownerIds }
 			: undefined,

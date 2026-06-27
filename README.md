@@ -19,30 +19,27 @@ Publishing uploads the full JSON document as a new hosted configuration version 
 
 ## Configuration JSON shape
 
-Hosted JSON uses snake_case fields aligned with AppConfig storage, for example:
+Hosted JSON uses camelCase fields aligned with AppConfig storage, for example:
 
 ```json
 {
-	"featureFlags": {
-		"limit_order": {
-			"enabled": true,
-			"created_at": 1743868800,
-			"updated_at": 1743868800,
-			"valid_until": 1743868800,
-			"environment": "production",
-			"meta_data": {
-				"version": "1",
-				"description": "Enable limit order"
-			},
-			"attributes": {
-				"allowedAccountOwnerIds": ["1234567890"]
-			}
+	"limitOrder": {
+		"enabled": true,
+		"createdAt": 1743868800,
+		"updatedAt": 1743868800,
+		"validUntil": 1743868800,
+		"metadata": {
+			"version": "1",
+			"description": "Enable limit order"
+		},
+		"attributes": {
+			"allowedAccountOwnerIds": ["1234567890"]
 		}
 	}
 }
 ```
 
-Legacy `metaData` (camelCase) in old documents is accepted on read and normalized to `meta_data`.
+Legacy snake_case fields (`created_at`, `updated_at`, `valid_until`, `meta_data`) and `metaData` in old documents are accepted on read and normalized to camelCase.
 
 ## Development
 

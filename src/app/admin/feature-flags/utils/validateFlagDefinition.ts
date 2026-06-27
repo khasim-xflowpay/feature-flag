@@ -6,10 +6,10 @@ import type {
 
 const DEF_TOP_KEYS = new Set([
 	"enabled",
-	"created_at",
-	"updated_at",
-	"valid_until",
-	"meta_data",
+	"createdAt",
+	"updatedAt",
+	"validUntil",
+	"metadata",
 	"attributes",
 ]);
 
@@ -19,15 +19,20 @@ function isFiniteNumber(v: unknown): v is number {
 
 function validateMetaData(v: unknown): string | null {
 	if (v === undefined) return null;
-	if (typeof v !== "object" || v === null) return "meta_data must be an object.";
+	if (typeof v !== "object" || v === null) return "metadata must be an object.";
 	const o = v as Record<string, unknown>;
 	const allowed = new Set(["version", "description"]);
 	for (const k of Object.keys(o)) {
-		if (!allowed.has(k)) return `meta_data has unknown field "${k}".`;
+		if (!allowed.has(k)) return `metadata has unknown field "${k}".`;
 		const val = o[k];
 		if (val === null || val === undefined) continue;
+		if (k === "version") {
+			if (typeof val !== "string" && typeof val !== "number")
+				return `metadata.version must be a string, number, or null.`;
+			continue;
+		}
 		if (typeof val !== "string")
-			return `meta_data.${k} must be a string or null.`;
+			return `metadata.${k} must be a string or null.`;
 	}
 	return null;
 }
@@ -81,12 +86,12 @@ export function validateFeatureFlagDefinition(v: unknown): string | null {
 	for (const k of Object.keys(o)) {
 		if (!DEF_TOP_KEYS.has(k)) return `Unknown field "${k}".`;
 	}
-	for (const timeKey of ["created_at", "updated_at", "valid_until"] as const) {
+	for (const timeKey of ["createdAt", "updatedAt", "validUntil"] as const) {
 		const t = o[timeKey];
 		if (t !== undefined && !isFiniteNumber(t))
 			return `"${timeKey}" must be a finite number (Unix seconds).`;
 	}
-	const mErr = validateMetaData(o.meta_data);
+	const mErr = validateMetaData(o.metadata);
 	if (mErr) return mErr;
 	const aErr = validateAttributes(o.attributes);
 	if (aErr) return aErr;
@@ -107,9 +112,11 @@ export function normalizeMetaData(
 	if (typeof v !== "object" || v === null) return undefined;
 	const o = v as Record<string, unknown>;
 	const version =
-		typeof o.version === "string" && o.version.trim() !== ""
-			? o.version.trim()
-			: undefined;
+		typeof o.version === "number" && Number.isFinite(o.version)
+			? o.version
+			: typeof o.version === "string" && o.version.trim() !== ""
+				? o.version.trim()
+				: undefined;
 	const description =
 		typeof o.description === "string" && o.description.trim() !== ""
 			? o.description.trim()
@@ -150,11 +157,11 @@ export function normalizeFeatureFlagDefinition(
 ): FeatureFlagDefinition {
 	return {
 		enabled: raw.enabled,
-		...(raw.created_at !== undefined ? { created_at: raw.created_at } : {}),
-		...(raw.updated_at !== undefined ? { updated_at: raw.updated_at } : {}),
-		...(raw.valid_until !== undefined ? { valid_until: raw.valid_until } : {}),
-		...(normalizeMetaData(raw.meta_data) !== undefined
-			? { meta_data: normalizeMetaData(raw.meta_data) }
+		...(raw.createdAt !== undefined ? { createdAt: raw.createdAt } : {}),
+		...(raw.updatedAt !== undefined ? { updatedAt: raw.updatedAt } : {}),
+		...(raw.validUntil !== undefined ? { validUntil: raw.validUntil } : {}),
+		...(normalizeMetaData(raw.metadata) !== undefined
+			? { metadata: normalizeMetaData(raw.metadata) }
 			: {}),
 		...(normalizeAttributes(raw.attributes) !== undefined
 			? { attributes: normalizeAttributes(raw.attributes) }

@@ -20,6 +20,7 @@ type Props = {
 	flagKey: string;
 	draft: FeatureFlagDefinition;
 	saving: boolean;
+	submitDisabled?: boolean;
 	submitLabel: string;
 	onKeyChange?: (key: string) => void;
 	onDraftChange: (next: FeatureFlagDefinition) => void;
@@ -41,6 +42,7 @@ export function FlagModal({
 	flagKey,
 	draft,
 	saving,
+	submitDisabled = false,
 	submitLabel,
 	onKeyChange,
 	onDraftChange,
@@ -60,8 +62,8 @@ export function FlagModal({
 			else if (!FLAG_KEY_RE.test(k)) next.key = "format";
 		}
 		if (
-			draft.valid_until === undefined ||
-			!Number.isFinite(draft.valid_until)
+			draft.validUntil === undefined ||
+			!Number.isFinite(draft.validUntil)
 		) {
 			next.validUntil = true;
 		}
@@ -154,11 +156,11 @@ export function FlagModal({
 							</span>
 							<input
 								type="date"
-								value={unixSecondsToDateInput(draft.valid_until)}
+								value={unixSecondsToDateInput(draft.validUntil)}
 								onChange={(e) => {
 									setErrors((prev) => ({ ...prev, validUntil: undefined }));
 									patch({
-										valid_until: dateInputToUnixSeconds(e.target.value),
+										validUntil: dateInputToUnixSeconds(e.target.value),
 									});
 								}}
 								aria-invalid={validUntilInvalid}
@@ -190,10 +192,14 @@ export function FlagModal({
 								{msg.modal.versionLabel}
 							</span>
 							<input
-								value={draft.meta_data?.version ?? ""}
+								value={
+									draft.metadata?.version != null
+										? String(draft.metadata.version)
+										: ""
+								}
 								onChange={(e) =>
 									patch({
-										meta_data: { ...draft.meta_data, version: e.target.value },
+										metadata: { ...draft.metadata, version: e.target.value },
 									})
 								}
 								className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-black/20 px-4 py-3 text-sm text-foreground outline-none placeholder:text-[rgba(145,162,190,0.85)] focus:border-[var(--accent)] focus:bg-black/30 focus:ring-2 focus:ring-[rgba(56,189,248,0.22)]"
@@ -205,11 +211,11 @@ export function FlagModal({
 								{msg.modal.descriptionLabel}
 							</span>
 							<textarea
-								value={draft.meta_data?.description ?? ""}
+								value={draft.metadata?.description ?? ""}
 								onChange={(e) =>
 									patch({
-										meta_data: {
-											...draft.meta_data,
+										metadata: {
+											...draft.metadata,
 											description: e.target.value,
 										},
 									})
@@ -253,9 +259,10 @@ export function FlagModal({
 					</button>
 					<button
 						type="button"
-						disabled={saving}
+						disabled={saving || submitDisabled}
+						title={submitDisabled ? msg.modal.saveNoChangesHint : undefined}
 						onClick={trySubmit}
-						className="rounded-full border border-[rgba(125,211,252,0.35)] bg-[linear-gradient(135deg,#38bdf8,#2563eb)] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_18px_30px_rgba(37,99,235,0.35)] hover:-translate-y-0.5 disabled:opacity-50"
+						className="rounded-full border border-[rgba(125,211,252,0.35)] bg-[linear-gradient(135deg,#38bdf8,#2563eb)] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_18px_30px_rgba(37,99,235,0.35)] hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45"
 					>
 						{submitLabel}
 					</button>

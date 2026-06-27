@@ -8,6 +8,7 @@ import { useState } from "react";
 import { featureFlagsMessages as msg } from "../messages";
 import { FLAG_KEY_RE } from "../utils/flagKey";
 import { buildUpdatedFlag, cloneConfig } from "../utils/configUtils";
+import { normalizeFeatureFlagDefinitionFromLegacy } from "@/lib/featureFlagConfig";
 import {
 	isValidFeatureFlagDefinition,
 	normalizeFeatureFlagDefinition,
@@ -67,7 +68,9 @@ export function BulkImportModal({
 				errors.push(msg.bulkImport.keyAlreadyExists(key));
 				continue;
 			}
-			const defRaw = root[key];
+			const defRaw = normalizeFeatureFlagDefinitionFromLegacy(
+				root[key] as FeatureFlagDefinition,
+			);
 			const err = validateFeatureFlagDefinition(defRaw);
 			if (err) {
 				errors.push(msg.bulkImport.keyInvalid(key, err));

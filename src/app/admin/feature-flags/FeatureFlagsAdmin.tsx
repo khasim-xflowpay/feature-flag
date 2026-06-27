@@ -23,6 +23,7 @@ import {
 	cloneConfig,
 	configsAreEqual,
 	definitionsEqual,
+	modalDraftEqualsStored,
 } from "./utils/configUtils";
 import { todayUnixSeconds } from "./utils/dateUtils";
 
@@ -31,7 +32,12 @@ import { todayUnixSeconds } from "./utils/dateUtils";
 type ModalState =
 	| null
 	| { mode: "add"; key: string; def: FeatureFlagDefinition }
-	| { mode: "edit"; key: string; def: FeatureFlagDefinition };
+	| {
+			mode: "edit";
+			key: string;
+			def: FeatureFlagDefinition;
+			originalDef: FeatureFlagDefinition;
+	  };
 
 type DirtyAction =
 	| { kind: "reload" }
@@ -47,9 +53,9 @@ function defaultNewFlag(): FeatureFlagDefinition {
 	const today = todayUnixSeconds();
 	return {
 		enabled: true,
-		created_at: today,
-		updated_at: today,
-		meta_data: undefined,
+		createdAt: today,
+		updatedAt: today,
+		metadata: undefined,
 		attributes: { allowedAccountOwnerIds: [] },
 	};
 }
@@ -254,7 +260,11 @@ export default function FeatureFlagsAdmin() {
 			next[key] = buildUpdatedFlag(modal.def, true, undefined);
 			setRowOrderBoost((p) => [key, ...p.filter((k) => k !== key)]);
 		} else {
-			next[key] = buildUpdatedFlag(modal.def, false, next[key]?.created_at);
+			if (modalDraftEqualsStored(modal.def, modal.originalDef)) {
+				setModal(null);
+				return;
+			}
+			next[key] = buildUpdatedFlag(modal.def, false, next[key]?.createdAt);
 		}
 		setConfig(next);
 		setFeedback(null);
@@ -439,13 +449,19 @@ export default function FeatureFlagsAdmin() {
 							rows={rows}
 							saving={saving}
 							pendingKeys={pendingKeys}
-							onEdit={(key, def) =>
+							onEdit={(key, def) => {
+								const clone = JSON.parse(
+									JSON.stringify(def),
+								) as FeatureFlagDefinition;
 								setModal({
 									mode: "edit",
 									key,
-									def: JSON.parse(JSON.stringify(def)) as FeatureFlagDefinition,
-								})
-							}
+									def: clone,
+									originalDef: JSON.parse(
+										JSON.stringify(def),
+									) as FeatureFlagDefinition,
+								});
+							}}
 							onDelete={requestDeleteFlag}
 						/>
 					) : null}
@@ -469,6 +485,10 @@ export default function FeatureFlagsAdmin() {
 						flagKey={modal.key}
 						draft={modal.def}
 						saving={saving}
+						submitDisabled={
+							modal.mode === "edit" &&
+							modalDraftEqualsStored(modal.def, modal.originalDef)
+						}
 						submitLabel={
 							modal.mode === "add"
 								? msg.modal.addToDraft

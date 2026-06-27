@@ -38,6 +38,7 @@ export const featureFlagsMessages = {
 		saveDeploy: "Save & deploy",
 		addToDraft: "Add to table",
 		saveLocalChanges: "Save changes",
+		saveNoChangesHint: "No changes to save",
 	},
 
 	admin: {
@@ -141,7 +142,7 @@ export const featureFlagsMessages = {
 			"Paste a JSON object: each property name is a flag key, and its value must match the feature flag shape (enabled boolean, optional metadata, attributes, timestamps). Keys must not already exist in the table.",
 		pasteLabel: "Flag object (JSON)",
 		placeholder:
-			'{\n  "new_rollout": {\n    "enabled": true,\n    "meta_data": { "version": "1", "description": "…" }\n  }\n}',
+			'{\n  "new_rollout": {\n    "enabled": true,\n    "metadata": { "version": "1", "description": "…" }\n  }\n}',
 		addToTable: "Add to table",
 		invalidJson: "Invalid JSON — check brackets and quotes.",
 		rootMustBeObject: "Root value must be a JSON object (not an array or primitive).",
